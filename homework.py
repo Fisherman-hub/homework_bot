@@ -6,11 +6,12 @@ from http import HTTPStatus
 import exceptions
 import project_utils
 import telegram
+import sys
+from typing import Dict
 
 from dotenv import load_dotenv
 
 load_dotenv()
-project_utils.logging_settings()
 
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -29,7 +30,15 @@ HOMEWORK_STATUSES = {
 
 def send_message(bot: telegram.Bot, message: str) -> None:
     """Отправка сообщение ботом."""
-    bot.send_message(TELEGRAM_CHAT_ID, message)
+    logging.info('Попытка отправки сообщения в телеграмм чат')
+    try:
+        bot.send_message(TELEGRAM_CHAT_ID, message)
+    except telegram.error.TelegramError as error:
+        raise telegram.error.TelegramError(
+            f'Ошибка отправки сообщения {error}'
+        )
+    else:
+        logging.info('Сообщение отправлено в чат.')
 
 
 def get_api_answer(current_timestamp: int):
@@ -37,27 +46,43 @@ def get_api_answer(current_timestamp: int):
     timestamp = current_timestamp or int(time.time())
     params = {'from_date': timestamp}
 
-    api_params = {
+    request_params = {
         'url': ENDPOINT,
         'headers': HEADERS,
         'params': params
     }
 
-    logging.info('Начали запрос к API')
     try:
+        logging.info(
+            (
+
+                'Начинаем подключение к эндпоинту {url} с параметрами'
+                ' headers = {headers}; params = {params}'
+            ).format(**request_params)
+        )
+
         response = requests.get(
-            url=api_params['url'],
-            headers=api_params['headers'],
-            params=api_params['params']
+            **request_params
         )
         if response.status_code != HTTPStatus.OK:
-            message = f'Код ответа сервера {response.status_code}'
-            raise requests.exceptions.HTTPError(message)
+            raise exceptions.WrongAPIResponseCodeError(
+                'Ответ сервера не является успешным:'
+                f' request params = {request_params};'
+                f' http_code = {response.status_code};'
+                f' reason = {response.reason}; '
+                f' content = {response.text}'
+            )
         logging.info('Соединение с сервером установлено')
         return response.json()
-    except exceptions.JSONDecodeError:
-        raise exceptions.JSONDecodeError(
-            'json файл не поддается декодированию'
+    except Exception as error:
+        raise exceptions.ConnectionError(
+            (
+                'Во время подключения к эндпоинту {url} произошла'
+                ' непредвиденная ошибка {error}'
+                ' headers = {HEADERS};'
+                ' params = {params}'
+            ).format(error=error,
+                     **request_params)
         )
 
 
@@ -85,12 +110,12 @@ def parse_status(homework) -> str:
     homework_name = homework['homework_name']
     homework_status = homework['status']
 
-    if homework_name and homework_status:
+    if homework_name and homework_status in HOMEWORK_STATUSES:
         verdict = HOMEWORK_STATUSES[homework_status]
         return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
     else:
-        return None
+        raise exceptions.WorkStatusNotChanged('Статус работы не изменился.')
 
 
 def check_tokens() -> bool:
@@ -105,33 +130,61 @@ def check_tokens() -> bool:
 
 def main() -> None:
     """Основная логика работы бота."""
-    if check_tokens():
+    while True:
+        if not check_tokens():
+            message = (
+                'Отсутствуют обязательные переменные окружения:'
+                ' PRACTICUM_TOKEN,'
+                ' TELEGRAM_TOKEN, '
+                ' TELEGRAM_CHAT_ID.'
+                ' Программа принудительно остановлена.'
+            )
+            logging.critical(message)
+            sys.exit(message)
+
         bot = telegram.Bot(token=TELEGRAM_TOKEN)
         current_timestamp = int(time.time())
 
-        logging.info('Создан экземпляр класса Bot')
+        try:
+            current_report: Dict = {
+                'name': '',
+                'output': ''
+            }
+            prev_report: Dict = current_report.copy()
 
-        while True:
-            try:
-                response = get_api_answer(current_timestamp)
-                homeworks = check_response(response)
-                answer = parse_status(homeworks)
-                if answer is not None:
-                    send_message(bot, answer)
+            response = get_api_answer(current_timestamp)
 
-                current_timestamp = int(time.time())
-                time.sleep(RETRY_TIME)
+            current_timestamp = response.get('current_date', current_timestamp)
+            new_homeworks = check_response(response)
 
-            except Exception as error:
-                message = f'Сбой в работе программы: {error}'
-                send_message(bot, message)
-                time.sleep(RETRY_TIME)
+            if new_homeworks:
+                current_report['name'] = new_homeworks[0]['homework_name']
+                current_report['output'] = parse_status(new_homeworks[0])
             else:
-                logging.info('Цикл  функции main выполнился без ошибок')
-    else:
-        time.sleep(RETRY_TIME)
-        main()
+                current_report['output'] = (
+                    f'За период от {current_timestamp} до настоящего момента'
+                    ' домашних работ нет.'
+                )
+
+            if current_report != prev_report:
+                send_message(bot, current_report)
+                prev_report = current_report.copy()
+
+            else:
+                logging.debug('В ответе нет новых статусов.')
+
+        except Exception as error:
+            message = f'Сбой в работе программы: {error}'
+            current_report['output'] = message
+            logging.error(message, exc_info=True)
+            if current_report != prev_report:
+                send_message(bot, current_report)
+                prev_report = current_report.copy()
+
+        finally:
+            time.sleep(RETRY_TIME)
 
 
 if __name__ == '__main__':
+    project_utils.logging_settings()
     main()

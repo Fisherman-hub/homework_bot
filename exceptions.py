@@ -16,3 +16,20 @@ class BaseExceptions(Exception):
 
 class JSONDecodeError(BaseExceptions, json.JSONDecodeError):
     """Ошибка декодирования json файла."""
+
+
+class TelegramError(BaseExceptions):
+    """Ошибка отправки сообщения."""
+
+
+class WorkStatusNotChanged(BaseExceptions):
+    """Ошибка статус работы не изменился."""
+
+
+class WrongAPIResponseCodeError(BaseExceptions):
+    """Ответ сервера отличен от 200."""
+
+
+class ConnectionError(BaseExceptions):
+    """Ошибка подключения."""
+
