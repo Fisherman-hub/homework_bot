@@ -110,6 +110,9 @@ def parse_status(homework) -> str:
     homework_name = homework['homework_name']
     homework_status = homework['status']
 
+    if homework_status not in HOMEWORK_STATUSES:
+        raise KeyError('Недокументированный статус домашней работы')
+
     if homework_name and homework_status in HOMEWORK_STATUSES:
         verdict = HOMEWORK_STATUSES[homework_status]
         return f'Изменился статус проверки работы "{homework_name}". {verdict}'
@@ -120,7 +123,8 @@ def parse_status(homework) -> str:
 
 def check_tokens() -> bool:
     """Проверка возможности получения токенов."""
-    if PRACTICUM_TOKEN and TELEGRAM_TOKEN and TELEGRAM_CHAT_ID:
+    check_params = (PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
+    if all(check_params):
         logging.info('Токены получены.')
         return True
     else:
@@ -130,21 +134,21 @@ def check_tokens() -> bool:
 
 def main() -> None:
     """Основная логика работы бота."""
+    if not check_tokens():
+        message = (
+            'Отсутствуют обязательные переменные окружения:'
+            ' PRACTICUM_TOKEN,'
+            ' TELEGRAM_TOKEN, '
+            ' TELEGRAM_CHAT_ID.'
+            ' Программа принудительно остановлена.'
+        )
+        logging.critical(message)
+        sys.exit(message)
+
+    bot = telegram.Bot(token=TELEGRAM_TOKEN)
+    current_timestamp = int(time.time())
+
     while True:
-        if not check_tokens():
-            message = (
-                'Отсутствуют обязательные переменные окружения:'
-                ' PRACTICUM_TOKEN,'
-                ' TELEGRAM_TOKEN, '
-                ' TELEGRAM_CHAT_ID.'
-                ' Программа принудительно остановлена.'
-            )
-            logging.critical(message)
-            sys.exit(message)
-
-        bot = telegram.Bot(token=TELEGRAM_TOKEN)
-        current_timestamp = int(time.time())
-
         try:
             current_report: Dict = {
                 'name': '',
