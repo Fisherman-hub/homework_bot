@@ -107,18 +107,21 @@ def check_response(response) -> list:
 
 def parse_status(homework) -> str:
     """Проверка статуса домашней работы."""
+    if 'homework_name' not in homework:
+        raise KeyError(f'В домашней работе в ответе от API отсутствует ключ'
+                       f' "homework_name": homework = {homework}')
+
     homework_name = homework['homework_name']
     homework_status = homework['status']
 
     if homework_status not in HOMEWORK_STATUSES:
-        raise KeyError('Недокументированный статус домашней работы')
+        raise ValueError(
+            'В ответе от API пришел неизвестный статус работы,'
+            f' status = {homework_status}.'
+        )
 
-    if homework_name and homework_status in HOMEWORK_STATUSES:
-        verdict = HOMEWORK_STATUSES[homework_status]
-        return f'Изменился статус проверки работы "{homework_name}". {verdict}'
-
-    else:
-        raise exceptions.WorkStatusNotChanged('Статус работы не изменился.')
+    verdict = HOMEWORK_STATUSES[homework_status]
+    return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
 
 def check_tokens() -> bool:
